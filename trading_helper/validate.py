@@ -8,6 +8,7 @@ or that need manual review.
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass, field, asdict
 from datetime import date, datetime
 import hashlib
@@ -21,6 +22,13 @@ EVENT_COLUMNS = ["event_id", "symbol", "receipt_date", "event_type", "contract_a
                  "risk_available_date", "source_url", "fetched_at"]
 # Only new_contract enters signals. Others are kept for linkage and later cancellation handling.
 EVENT_TYPES = {"new_contract", "amendment", "cancellation", "withdrawal", "other"}
+TRADE_COLUMNS = ["trade_id", "signal_id", "symbol", "side", "trade_date", "fill_time", "fill_price",
+                 "quantity", "fee", "tax", "order_type", "order_reason", "broker_ref", "note", "recorded_at"]
+TRADE_SIDES = {"buy", "sell"}
+ORDER_TYPES = {"limit_open", "market_open", "other"}
+ORDER_REASONS = {"entry", "stop", "target", "time_exit", "halt", "manual"}
+# weekly_execution_v1 procedure: buys are pre-open limit orders, sells are pre-open market orders.
+EXPECTED_ORDER_TYPE = {"buy": "limit_open", "sell": "market_open"}
 SCHEMA_VERSION = "1"
 
 
@@ -291,7 +299,102 @@ def validate_events(path: str | Path, price_symbols: set[str] | None = None) -> 
     return report
 
 
-def validate_all(prices: str | Path | None, events: str | Path | None) -> dict:
+def validate_trades(path: str | Path) -> FileReport:
+    """Broker fill records (docs/LIVE_RECONCILIATION.md). Real figures only; no estimates."""
+    path = Path(path)
+    report = FileReport(str(path), "trades")
+    if path.exists():
+        report.sha256 = sha256_of(path)
+    rows = _read_rows(path, TRADE_COLUMNS, report)
+    if rows is None:
+        return report
+    report.rows = len(rows)
+    ids: dict[str, int] = {}
+    position: dict[str, int] = {}  # symbol -> net shares, in file order (must be chronological)
+    last_date: dict[str, date] = {}
+    manual = 0
+    for n, r in enumerate(rows, start=1):
+        if not r["trade_id"]:
+            report.error(n, "trade_id", "trade_id required")
+        elif r["trade_id"] in ids:
+            report.error(n, "trade_id", f"duplicate trade_id {r['trade_id']} (first at row {ids[r['trade_id']]})")
+        else:
+            ids[r["trade_id"]] = n
+        if not r["signal_id"]:
+            report.error(n, "signal_id", "signal_id required (use MANUAL-... for non-strategy trades)")
+        elif r["signal_id"].startswith("MANUAL-"):
+            manual += 1
+        _check_symbol(report, n, r["symbol"])
+        side = r["side"]
+        if side not in TRADE_SIDES:
+            report.error(n, "side", f"side must be buy/sell: {side!r}")
+        d = parse_date(r["trade_date"])
+        if d is None:
+            report.error(n, "trade_date", f"trade_date not ISO: {r['trade_date']!r}")
+        if r["fill_time"] and not re.fullmatch(r"\d{2}:\d{2}(:\d{2})?", r["fill_time"]):
+            report.error(n, "fill_time", f"fill_time must be HH:MM or empty: {r['fill_time']!r}")
+        price = parse_number(r["fill_price"])
+        if price is None or price <= 0:
+            report.error(n, "fill_price", f"fill_price must be positive: {r['fill_price']!r}")
+        qty = r["quantity"]
+        if not qty.isdigit() or int(qty) < 1:
+            report.error(n, "quantity", f"quantity must be a positive integer: {qty!r}")
+        for col in ("fee", "tax"):
+            v = parse_number(r[col])
+            if v is None or v < 0:
+                report.error(n, col, f"{col} must be a nonnegative KRW amount (actual, not estimated): {r[col]!r}")
+        if side == "sell" and parse_number(r["tax"]) == 0:
+            report.warn(n, "tax", "sell with zero tax; confirm against the broker statement")
+        if side == "buy" and (parse_number(r["tax"]) or 0) > 0:
+            report.warn(n, "tax", "buy with nonzero tax; KR buys normally carry fee only")
+        ot = r["order_type"]
+        if ot not in ORDER_TYPES:
+            report.error(n, "order_type", f"order_type must be one of {sorted(ORDER_TYPES)}: {ot!r}")
+        elif side in EXPECTED_ORDER_TYPE and ot != EXPECTED_ORDER_TYPE[side]:
+            report.warn(n, "order_type", f"procedure deviation: {side} expected {EXPECTED_ORDER_TYPE[side]}, got {ot}")
+        reason = r["order_reason"]
+        if reason not in ORDER_REASONS:
+            report.error(n, "order_reason", f"order_reason must be one of {sorted(ORDER_REASONS)}: {reason!r}")
+        elif side == "buy" and reason != "entry":
+            report.error(n, "order_reason", "buy rows must have order_reason=entry")
+        elif side == "sell" and reason == "entry":
+            report.error(n, "order_reason", "sell rows cannot have order_reason=entry")
+        if reason == "manual" and not r["signal_id"].startswith("MANUAL-"):
+            report.warn(n, "order_reason", "manual order linked to a strategy signal; excluded from strategy stats")
+        _check_fetched_at_like(report, n, "recorded_at", r["recorded_at"], d)
+        if d is not None and r["symbol"] and side in TRADE_SIDES and qty.isdigit():
+            sym = r["symbol"]
+            if sym in last_date and d < last_date[sym]:
+                report.error(n, "trade_date", f"{sym}: rows must be in chronological order")
+            last_date[sym] = d
+            net = position.get(sym, 0)
+            if side == "buy":
+                position[sym] = net + int(qty)
+            else:
+                if int(qty) > net:
+                    report.error(n, "quantity", f"{sym}: selling {qty} with net position {net}")
+                position[sym] = net - int(qty)
+    open_positions = {s: q for s, q in position.items() if q > 0}
+    if open_positions:
+        report.warn(None, None, f"open positions at end of file: {open_positions}")
+    report.stats = {"symbols": len(position), "manual_rows": manual, "open_positions": open_positions}
+    return report
+
+
+def _check_fetched_at_like(report: FileReport, n: int, column: str, text: str, not_before: date | None) -> None:
+    if not text:
+        report.error(n, column, f"{column} required")
+        return
+    ts = parse_datetime(text)
+    if ts is None:
+        report.error(n, column, f"{column} not ISO 8601: {text!r}")
+        return
+    if not_before is not None and ts.date() < not_before:
+        report.error(n, column, f"{column} {ts.date()} precedes trade_date {not_before}")
+
+
+def validate_all(prices: str | Path | None, events: str | Path | None,
+                 trades: str | Path | None = None) -> dict:
     reports = []
     symbols = None
     if prices is not None:
@@ -301,6 +404,8 @@ def validate_all(prices: str | Path | None, events: str | Path | None) -> dict:
             symbols = _symbols_in(Path(prices))
     if events is not None:
         reports.append(validate_events(events, symbols))
+    if trades is not None:
+        reports.append(validate_trades(trades))
     return {"schema_version": SCHEMA_VERSION,
             "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "ok": all(r.ok for r in reports),

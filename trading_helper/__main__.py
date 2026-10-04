@@ -39,9 +39,9 @@ def run_demo(args):
 
 
 def run_validate(args):
-    if args.prices is None and args.events is None:
-        sys.exit("validate: give --prices and/or --events")
-    result = validate_all(args.prices, args.events)
+    if args.prices is None and args.events is None and args.trades is None:
+        sys.exit("validate: give --prices, --events and/or --trades")
+    result = validate_all(args.prices, args.events, args.trades)
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     else:
@@ -113,6 +113,7 @@ def main():
     val = sub.add_parser("validate", help="check CSV files against docs/DATA_CONTRACT.md")
     val.add_argument("--prices")
     val.add_argument("--events")
+    val.add_argument("--trades", help="broker fill records; see docs/LIVE_RECONCILIATION.md")
     val.add_argument("--json", action="store_true")
     val.set_defaults(func=run_validate)
     col = sub.add_parser("dart-collect", help="fetch OpenDART supply-contract filings into data/raw (key from env)")

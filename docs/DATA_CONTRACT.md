@@ -34,6 +34,11 @@ CSV 헤더 템플릿은 `data/templates/`에 있습니다.
 - 사건별 원본 공시와 관련 정정·취소를 연결. 취소는 그 공개 시점부터 적용.
 - source_url과 fetched_at 필수. 외부 데이터를 LLM 추측으로 대체하지 않음.
 
+## trades.csv
+
+실거래·모의투자 체결 기록. 열 정의, 허용값, 대조 규칙은 `docs/LIVE_RECONCILIATION.md`.
+검증: `python -m trading_helper validate --trades <csv>`. 수수료·세금은 증권사 내역의 실제 금액만.
+
 ## 원본·정규화 저장
 
 `data/raw/`에 원본, `data/normalized/`에 정규화 결과(둘 다 Git 제외).

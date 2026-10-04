@@ -1,0 +1,1 @@
+trade_id,signal_id,symbol,side,trade_date,fill_time,fill_price,quantity,fee,tax,order_type,order_reason,broker_ref,note,recorded_at

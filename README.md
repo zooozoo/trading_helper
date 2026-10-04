@@ -30,6 +30,8 @@ python -m trading_helper demo
 일요일 추천 → 월요일 개장 전 지정가 매수 예약 → 평일 장 마감 후 종가 보고(ChatGPT, 보고만)
 → 기준선 이탈 시 다음 날 개장 전 시장가 매도 예약 → 주 마지막 거래일 시가 청산.
 `config/strategy_weekly_v1.json`: 초기 가설 수치. v0와 성과를 섞지 않습니다.
+`docs/LIVE_RECONCILIATION.md`: 체결 기록(`data/templates/trades.csv`)으로 계획 대 실제를 대조하는 규칙과
+전략 수정 허용 조건. 실거래 손익으로 파라미터를 직접 바꾸지 않습니다.
 
 전체 포트폴리오 백테스트, 수집기, 주간 리포트, 예약 실행은 다음 작업입니다.
 단일 거래 계산 함수를 전체 백테스트 엔진으로 착각하지 마세요.
