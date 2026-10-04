@@ -24,6 +24,13 @@ python -m trading_helper demo
 `trading_helper/rules.py`: 신호·매매 계획·일봉 청산·수량 계산 함수.
 `data/templates/`: 실데이터 입력 형식의 헤더. 샘플 종목 데이터는 없습니다.
 
+## 주간 실행 전략
+
+`docs/STRATEGY_WEEKLY_V1.md`: 사용자가 실제로 실행할 수 있는 절차에 맞춘 변형.
+일요일 추천 → 월요일 개장 전 지정가 매수 예약 → 평일 장 마감 후 종가 보고(ChatGPT, 보고만)
+→ 기준선 이탈 시 다음 날 개장 전 시장가 매도 예약 → 주 마지막 거래일 시가 청산.
+`config/strategy_weekly_v1.json`: 초기 가설 수치. v0와 성과를 섞지 않습니다.
+
 전체 포트폴리오 백테스트, 수집기, 주간 리포트, 예약 실행은 다음 작업입니다.
 단일 거래 계산 함수를 전체 백테스트 엔진으로 착각하지 마세요.
 
@@ -38,12 +45,27 @@ python -m trading_helper demo
 공통 지침은 `AGENTS.md`, Claude 전용 진입 문서는 `CLAUDE.md`입니다.
 두 도구가 동시에 같은 파일을 수정하지 않습니다. 기본은 순차 작업입니다.
 
+## 데이터 수집
+
+조사 결과와 사용 조건은 `docs/DATA_SOURCES.md`. OpenDART 키는 환경변수 `OPENDART_API_KEY`로만 읽습니다.
+
+```bash
+export OPENDART_API_KEY=...   # 출력·커밋 금지
+python -m trading_helper dart-collect --start 2024-01-01 --end 2024-03-31 --documents
+python -m trading_helper dart-normalize
+python -m trading_helper validate --events data/normalized/opendart_events.csv
+```
+
+`dart-normalize`는 숫자가 깨끗하게 추출되고 보고 비율과 교차 검증된 공시만 `opendart_events.csv`에
+넣고, 그마저도 `risk_approved=false`입니다. 나머지는 `opendart_review_queue.csv`에서 수동 확인합니다.
+정정·해지는 `opendart_related.csv`에 원본 공시와 연결됩니다.
+
 ## 다음 작업 순서
 
-- 공급자별 과거 가격·거래일·상장폐지 데이터 및 사용 조건 조사
-- OpenDART 원본 수집 → 신규 수주와 정정·해지 구분 → 원문 확인
+- (완료) 공급자 조사, OpenDART 수집기·정규화, 입력 검증기
+- OpenDART 키 발급 후 실제 수집 실행, 추출 규칙을 실제 원문으로 보정
+- 가격·거래일·상장폐지 데이터 출처 확정(사용 조건 확인 후) 및 수집
 - 실적·재무 위험 자료를 당시 공개 시점별로 정규화
-- 입력 검증기와 데이터 품질 보고서 구현
 - 거래정지·가격제한·기업행동을 처리하는 포트폴리오 백테스트 구현
 - 고정한 시간순 개발/검증/최종 평가 구간에서 비용 포함 성과 계산
 - 주간 관찰 보고 및 일별 신호·보유 포지션 관리 구현
