@@ -184,15 +184,18 @@ def date_windows(bgn_de: date, end_de: date, max_days: int = MAX_WINDOW_DAYS) ->
 def search_filings(client: Client, bgn_de: date, end_de: date, *, pblntf_ty: str | None = None,
                    pblntf_detail_ty: str | None = None, corp_cls: str | None = None,
                    corp_code: str | None = None, last_reprt_at: str = "N",
-                   page_count: int = 100, max_pages: int = 1000) -> list[dict]:
+                   page_count: int = 100, max_pages: int = 1000, use_cache: bool = True) -> list[dict]:
     """공시검색 list.json, all pages. last_reprt_at='N' keeps originals AND amendments
-    as separate rows, which point-in-time reconstruction requires."""
+    as separate rows, which point-in-time reconstruction requires.
+
+    Windows whose pages are all already in the raw store are read from disk (resumable),
+    so an interrupted multi-year run never re-spends quota on finished windows."""
     if not corp_code and (end_de - bgn_de).days + 1 > MAX_WINDOW_DAYS:
         rows: list[dict] = []
         for a, b in date_windows(bgn_de, end_de):
             rows.extend(search_filings(client, a, b, pblntf_ty=pblntf_ty, pblntf_detail_ty=pblntf_detail_ty,
                                        corp_cls=corp_cls, corp_code=corp_code, last_reprt_at=last_reprt_at,
-                                       page_count=page_count, max_pages=max_pages))
+                                       page_count=page_count, max_pages=max_pages, use_cache=use_cache))
         return rows
     if end_de < bgn_de:
         raise ValueError("end_de before bgn_de")
@@ -205,6 +208,10 @@ def search_filings(client: Client, bgn_de: date, end_de: date, *, pblntf_ty: str
     rows: list[dict] = []
     page = 1
     tag = f"{base['bgn_de']}_{base['end_de']}_{pblntf_ty or 'all'}_{pblntf_detail_ty or 'all'}_{corp_cls or 'all'}"
+    if use_cache:
+        cached = cached_list_pages(client.store, tag)
+        if cached is not None:
+            return cached
     while page <= max_pages:
         data = client.get_json("list.json", {**base, "page_no": page}, save_as=f"list_{tag}_p{page:04d}.json")
         if data.get("status") == STATUS_NO_DATA:
@@ -214,6 +221,33 @@ def search_filings(client: Client, bgn_de: date, end_de: date, *, pblntf_ty: str
         if page >= total_page:
             break
         page += 1
+    return rows
+
+
+def cached_list_pages(store: RawStore, tag: str) -> list[dict] | None:
+    """Rows of a fully downloaded window from disk, or None if any page is missing."""
+    folder = store.root / "list"
+    first = folder / f"list_{tag}_p0001.json"
+    if not first.exists():
+        return None
+    try:
+        data = json.loads(first.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if data.get("status") == STATUS_NO_DATA:
+        return []
+    if data.get("status") != STATUS_OK:
+        return None
+    total_page = int(data.get("total_page", 1) or 1)
+    rows: list[dict] = list(data.get("list", []))
+    for page in range(2, total_page + 1):
+        path = folder / f"list_{tag}_p{page:04d}.json"
+        if not path.exists():
+            return None
+        try:
+            rows.extend(json.loads(path.read_text(encoding="utf-8")).get("list", []))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None
     return rows
 
 

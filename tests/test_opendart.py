@@ -72,6 +72,21 @@ class OpenDartTests(unittest.TestCase):
         saved = Path(self.tmp.name) / records[0]["path"]
         self.assertTrue(saved.exists())
 
+    def test_completed_window_is_served_from_disk(self):
+        rows1 = [{"rcept_no": "20240102000001", "report_nm": "x", "rcept_dt": "20240102"}]
+        f = FakeFetcher({"list.json": [page(1, 2, rows1), page(2, 2, [])]})
+        od.search_filings(self.client(f), date(2024, 1, 1), date(2024, 1, 31), pblntf_ty="I")
+        self.assertEqual(len(f.calls), 2)
+        f2 = FakeFetcher({"list.json": []})  # any request would raise IndexError
+        rows = od.search_filings(self.client(f2), date(2024, 1, 1), date(2024, 1, 31), pblntf_ty="I")
+        self.assertEqual([r["rcept_no"] for r in rows], ["20240102000001"])
+        self.assertEqual(f2.calls, [])
+        # A partially downloaded window is re-fetched from page 1.
+        (self.store.root / "list" / "list_20240101_20240131_I_all_all_p0002.json").unlink()
+        f3 = FakeFetcher({"list.json": [page(1, 2, rows1), page(2, 2, [])]})
+        od.search_filings(self.client(f3), date(2024, 1, 1), date(2024, 1, 31), pblntf_ty="I")
+        self.assertEqual(len(f3.calls), 2)
+
     def test_no_data_status_returns_empty(self):
         body = json.dumps({"status": "013", "message": "조회된 데이타가 없습니다."}).encode()
         f = FakeFetcher({"list.json": [(200, body)]})
