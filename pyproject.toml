@@ -1,0 +1,9 @@
+[project]
+name = "trading-helper"
+version = "0.0.1"
+description = "Korean event trading research starter; no validated trading edge"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pyright]
+pythonVersion = "3.11"

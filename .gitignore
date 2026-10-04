@@ -1,0 +1,59 @@
+
+# Python environments and bytecode
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+# Test, lint, type-check and packaging outputs
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyright/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+build/
+dist/
+*.egg-info/
+.ipynb_checkpoints/
+# Secrets: retain safe example templates
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+# Local market data, caches and generated execution outputs
+/data/raw/
+/data/normalized/
+/data/intermediate/
+/data/cache/
+/outputs/
+/logs/
+*.log
+# Local research databases, including SQLite WAL/journal sidecars
+/data/**/*.db
+/data/**/*.db-*
+/data/**/*.sqlite
+/data/**/*.sqlite-*
+/data/**/*.sqlite3
+/data/**/*.sqlite3-*
+/data/**/*.duckdb
+/data/**/*.duckdb.*
+# macOS and local IDE files
+.DS_Store
+._*
+.idea/
+*.swp
+*.swo
+# Personal Claude settings; keep shared agent instructions in Git
+.claude/settings.local.json
+CLAUDE.local.md
+# Intentionally tracked:
+# AGENTS.md, CLAUDE.md, prompts/, docs/, config/, data/templates/
+# .env.example, .env.*.example, dependency lockfiles
+

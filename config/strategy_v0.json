@@ -1,0 +1,20 @@
+{
+  "strategy_id": "kr_contract_breakout_v0",
+  "status": "UNVALIDATED_HYPOTHESIS",
+  "market": "KR",
+  "direction": "long_only_cash",
+  "min_contract_revenue_ratio": 0.05,
+  "lookback": 20,
+  "volume_multiple": 1.5,
+  "atr_period": 14,
+  "atr_multiple": 2.0,
+  "reward_multiple": 2.0,
+  "max_entry_gap": 0.03,
+  "hold_sessions": 10,
+  "min_avg_turnover_krw": 1000000000,
+  "risk_fraction": 0.005,
+  "max_position_fraction": 0.2,
+  "max_positions": 3,
+  "same_bar_policy": "stop_first",
+  "weekly_report_is_not_order_execution": true
+}
