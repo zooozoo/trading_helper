@@ -30,7 +30,7 @@ REVIEW_COLUMNS = ["rcept_no", "symbol", "corp_name", "receipt_date", "report_nm"
                   "reasons", "contract_amount", "annual_revenue", "ratio_pct_reported",
                   "ratio_pct_computed", "counterparty", "contract_start", "contract_end",
                   "contract_date", "deferred_disclosure", "conditional", "subsidiary", "voluntary",
-                  "lookahead_flags", "revenue_basis", "source_url", "document_path", "fetched_at"]
+                  "lookahead_flags", "flags", "revenue_basis", "revenue_basis_hint", "source_url", "document_path", "fetched_at"]
 
 # ----------------------------------------------------------------------------- document parsing
 
@@ -75,10 +75,15 @@ FIELD_PATTERNS: dict[str, list[re.Pattern]] = {
     "end": [re.compile(r"^종료일"), re.compile(r"계약기간종료")],
     "contract_date": [re.compile(r"^계약\(수주\)일자"), re.compile(r"^계약일자"), re.compile(r"^계약일$")],
     "deferred": [re.compile(r"공시유보여부"), re.compile(r"^유보여부")],
+    "deferred_until": [re.compile(r"^유보기한")],
+    "deferred_reason": [re.compile(r"^유보사유")],
     "conditional": [re.compile(r"^조건부계약여부")],
     "amend_reason": [re.compile(r"^정정사유")],
 }
 UNIT_LABEL = re.compile(r"^(원|백만원|천원|%|\$|USD)$")
+SUB_ITEM = re.compile(r"^\s*[-–]\s*")  # "- 최근 매출액(원)" under 계약상대방 is the COUNTERPARTY's revenue
+PRIMARY_ONLY = {"revenue", "ratio", "amount_total", "amount_confirmed", "amount_plain", "amount_conditional"}
+BASIS_HINT = re.compile(r"최근\s*매출액[^。\n]{0,40}?(연결|별도|개별)")
 
 
 def extract_fields(rows: list[list[str]]) -> dict[str, str | None]:
@@ -88,8 +93,11 @@ def extract_fields(rows: list[list[str]]) -> dict[str, str | None]:
             label = norm_label(cell)
             if not label:
                 continue
+            sub_item = bool(SUB_ITEM.match(cell))
             for fld, patterns in FIELD_PATTERNS.items():
                 if found[fld] is not None or not any(p.search(label) for p in patterns):
+                    continue
+                if sub_item and fld in PRIMARY_ONLY:
                     continue
                 value = next((c for c in cells[i + 1:] if c and not UNIT_LABEL.match(c)), None)
                 if value is not None and norm_label(value) != label:
@@ -153,7 +161,9 @@ class Extraction:
     deferred: str | None
     conditional: str | None
     amend_reason: str | None
-    reasons: list[str] = field(default_factory=list)
+    revenue_basis_hint: str | None = None
+    reasons: list[str] = field(default_factory=list)  # block automatic acceptance
+    flags: list[str] = field(default_factory=list)    # informational; do not block
 
     @property
     def consistent(self) -> bool:
@@ -174,9 +184,13 @@ def extract_contract(xml_text: str) -> Extraction:
     revenue = parse_krw(f["revenue"])
     ratio = parse_pct(f["ratio"])
     computed = amount / revenue * 100 if amount and revenue else None
+    deferred = f["deferred"]
+    if deferred is None and any(_present(f[k]) for k in ("deferred_until", "deferred_reason")):
+        deferred = f"유보기한={f['deferred_until'] or ''} 유보사유={f['deferred_reason'] or ''}"
+    basis = BASIS_HINT.search(WS.sub(" ", _clean(xml_text)))
     ex = Extraction(amount, source, revenue, ratio, computed, f["counterparty"],
                     parse_ymd(f["start"]), parse_ymd(f["end"]), parse_ymd(f["contract_date"]),
-                    f["deferred"], f["conditional"], f["amend_reason"])
+                    deferred, f["conditional"], f["amend_reason"], basis.group(1) if basis else None)
     if amount is None:
         ex.reasons.append("contract_amount_not_parsed" + (f": {f['amount_plain']!r}" if f["amount_plain"] else ""))
     if revenue is None:
@@ -188,9 +202,18 @@ def extract_contract(xml_text: str) -> Extraction:
             ex.reasons.append(f"ratio_mismatch reported={ratio} computed={computed:.2f}")
     if source == "amount_plain" and parse_krw(f["amount_conditional"]):
         ex.reasons.append("conditional_amount_present_check_total")
-    if ex.deferred and re.search(r"예|유보|Y", ex.deferred) and not re.search(r"아니|미해당|N", ex.deferred):
-        ex.reasons.append(f"deferred_disclosure={ex.deferred}")
+    if ex.deferred and re.search(r"예|유보|Y", ex.deferred) and not re.fullmatch(r".*(아니오|미해당|N)\s*$", ex.deferred):
+        # Full deferral hides the amount: cannot be sized, needs review. Partial deferral (e.g. the
+        # counterparty withheld) leaves the amount/revenue/ratio cross-check intact: flag only.
+        if amount is None or revenue is None:
+            ex.reasons.insert(0, f"deferred_disclosure={ex.deferred}")
+        else:
+            ex.flags.append(f"partial_deferral={ex.deferred}")
     return ex
+
+
+def _present(text: str | None) -> bool:
+    return bool(text) and text.strip() not in ("-", "–", "해당없음", "미해당", "해당사항없음")
 
 
 # ----------------------------------------------------------------------------- normalization
@@ -249,7 +272,8 @@ def normalize(store: RawStore, out_dir: Path) -> dict:
     last_original: dict[str, str] = {}  # corp_code -> most recent new_contract rcept_no
     counts = {"filings": 0, "events_auto": 0, "review": 0, "related": 0, "missing_document": 0}
     for row in filings:
-        cls = classify_report_name(row.get("report_nm", ""), row.get("rm", ""))
+        row["report_nm"] = re.sub(r"\s+", " ", row.get("report_nm", "")).strip()
+        cls = classify_report_name(row["report_nm"], row.get("rm", ""))
         if not cls.is_supply_contract:
             continue
         counts["filings"] += 1
@@ -293,7 +317,8 @@ def normalize(store: RawStore, out_dir: Path) -> dict:
                   "ratio_pct_reported": ex.ratio_reported, "ratio_pct_computed": _fmt(ex.ratio_computed, 2),
                   "counterparty": ex.counterparty or "", "contract_start": ex.contract_start or "",
                   "contract_end": ex.contract_end or "", "contract_date": ex.contract_date or "",
-                  "deferred_disclosure": ex.deferred or "", "conditional": ex.conditional or ""}
+                  "deferred_disclosure": ex.deferred or "", "conditional": ex.conditional or "",
+                  "revenue_basis_hint": ex.revenue_basis_hint or "", "flags": ";".join(ex.flags)}
         auto_ok = (not reasons and ex.contract_amount and ex.annual_revenue and ex.consistent)
         if auto_ok:
             record["status"] = "auto_ok_pending_risk_review"

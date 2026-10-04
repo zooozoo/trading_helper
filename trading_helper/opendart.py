@@ -274,7 +274,10 @@ def parse_corp_codes(zip_bytes: bytes) -> list[dict]:
 
 # Official prefix list (공시검색 guide) plus plain [정정] as a tolerant fallback.
 AMEND_PREFIX = re.compile(r"^\s*\[(기재정정|첨부정정|첨부추가|변경등록|연장결정|발행조건확정|정정명령부과|정정제출요구|정정)\]")
-SUPPLY_CONTRACT = re.compile(r"단일판매\s*[ㆍ·･\.]?\s*공급계약|단일판매|공급계약")
+# Must contain 단일판매 (with or without the separator). Plain "공급계약" alone also matches
+# 유동성공급계약 (liquidity-provider) and free-text 투자판단관련주요경영사항 titles, which are not sales contracts.
+SUPPLY_CONTRACT = re.compile(r"단일판매\s*[ㆍ·･\.]?\s*공급계약")
+HALT_NOTICE = re.compile(r"매매거래정지")
 CANCEL_WORDS = re.compile(r"해지|취소|철회|해제")
 # rm (비고) codes: 유 KOSPI, 코 KOSDAQ, 넥 KONEX, 채 bond, 공 KFTC, 연 consolidated,
 # 정 "amended later" (look-ahead!), 철 "withdrawn later" (look-ahead!).
@@ -302,12 +305,15 @@ def classify_report_name(report_nm: str, rm: str = "") -> Classification:
     - '단일판매ㆍ공급계약체결' without those => candidate new_contract.
     Remarks (rm) codes are kept as-is in the note; their meaning is documented in docs/DATA_SOURCES.md.
     """
-    name = report_nm or ""
+    name = re.sub(r"\s+", " ", (report_nm or "")).strip()  # API pads titles with trailing spaces
     m = AMEND_PREFIX.match(name)
     tag = m.group(1) if m else None
     core = AMEND_PREFIX.sub("", name).strip()
     flags = tuple(v for k, v in RM_LOOKAHEAD.items() if k in (rm or ""))
     market = next((v for k, v in RM_MARKET.items() if k in (rm or "")), None)
+    if HALT_NOTICE.search(core):
+        # e.g. "주권매매거래정지 (단일판매공급계약)": KRX halts trading around a large contract filing.
+        return Classification(False, "halt_notice", tag, "trading-halt notice, not a contract", flags, market)
     supply = bool(SUPPLY_CONTRACT.search(core))
     if not supply:
         return Classification(False, "other", tag, "not a supply-contract report", flags, market)

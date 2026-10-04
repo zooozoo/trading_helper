@@ -40,6 +40,26 @@ MISMATCH_DOC = """<DOCUMENT><TABLE>
 </TABLE></DOCUMENT>"""
 
 
+DEFERRED_DOC = """<DOCUMENT><TABLE>
+<TR><TD>2. 계약내역</TD><TD>조건부 계약여부</TD><TD>미해당</TD></TR>
+<TR><TD></TD><TD>확정 계약금액</TD><TD>-</TD></TR>
+<TR><TD></TD><TD>계약금액 총액(원)</TD><TD>-</TD></TR>
+<TR><TD></TD><TD>최근 매출액(원)</TD><TD>37,266,321,862</TD></TR>
+<TR><TD></TD><TD>매출액 대비(%)</TD><TD>-</TD></TR>
+<TR><TD>3. 계약상대방</TD><TD></TD><TD>케이티스튜디오지니</TD></TR>
+<TR><TD></TD><TD>- 최근 매출액(원)</TD><TD>156,921,580,240</TD></TR>
+<TR><TD>9. 공시유보 관련내용</TD><TD>유보기한</TD><TD>2027-09-04</TD></TR>
+<TR><TD></TD><TD>유보사유</TD><TD>경영상 비밀 유지</TD></TR>
+<TR><TD>10. 기타</TD><TD></TD><TD>- 상기 '최근 매출액'은 2025년도말 연결재무제표 기준입니다.</TD></TR>
+</TABLE></DOCUMENT>"""
+
+COUNTERPARTY_ONLY_DOC = """<DOCUMENT><TABLE>
+<TR><TD>2. 계약내역</TD><TD>계약금액(원)</TD><TD>1,000,000,000</TD></TR>
+<TR><TD>3. 계약상대방</TD><TD></TD><TD>XYZ</TD></TR>
+<TR><TD></TD><TD>- 최근 매출액(원)</TD><TD>156,921,580,240</TD></TR>
+</TABLE></DOCUMENT>"""
+
+
 def zip_doc(rcept_no, text, encoding="utf-8"):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -71,6 +91,22 @@ class ExtractTests(unittest.TestCase):
         self.assertEqual(ex.contract_amount, 1_000_000_000)
         self.assertFalse(ex.consistent)
         self.assertTrue(any(r.startswith("ratio_mismatch") for r in ex.reasons))
+
+    def test_deferred_disclosure_and_counterparty_revenue(self):
+        ex = nz.extract_contract(DEFERRED_DOC)
+        self.assertIsNone(ex.contract_amount)
+        self.assertEqual(ex.annual_revenue, 37_266_321_862)  # company's, not counterparty's
+        self.assertTrue(ex.reasons[0].startswith("deferred_disclosure"), ex.reasons)
+        self.assertEqual(ex.revenue_basis_hint, "연결")
+        partial = DEFERRED_DOC.replace("<TD>-</TD></TR>\n<TR><TD></TD><TD>계약금액 총액(원)</TD><TD>-</TD>",
+                                       "<TD>-</TD></TR>\n<TR><TD></TD><TD>계약금액 총액(원)</TD><TD>3,726,632,186</TD>")
+        partial = partial.replace("<TD>매출액 대비(%)</TD><TD>-</TD>", "<TD>매출액 대비(%)</TD><TD>10.0</TD>")
+        ex = nz.extract_contract(partial)
+        self.assertEqual(ex.reasons, [])
+        self.assertTrue(ex.flags and ex.flags[0].startswith("partial_deferral"), ex.flags)
+        ex = nz.extract_contract(COUNTERPARTY_ONLY_DOC)
+        self.assertIsNone(ex.annual_revenue)  # sub-item revenue must never be used
+        self.assertIn("annual_revenue_not_parsed", ex.reasons)
 
     def test_units_and_dates(self):
         self.assertEqual(nz.parse_krw("1,500 백만원"), 1_500_000_000)

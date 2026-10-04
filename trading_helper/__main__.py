@@ -83,7 +83,10 @@ def run_dart_collect(args):
         summary["supply_contract_filings"] = len(rows)
         if args.documents:
             fetched = skipped = 0
-            for r in rows:
+            wanted = [r for r in rows if args.documents_all
+                      or od.classify_report_name(r["report_nm"], r.get("rm", "")).kind == "new_contract"]
+            summary["documents_wanted"] = len(wanted)
+            for r in wanted:
                 rc = r["rcept_no"]
                 if (store.root / "document" / f"{rc}.zip").exists():
                     skipped += 1
@@ -120,7 +123,10 @@ def main():
     col.add_argument("--start", required=True, help="YYYY-MM-DD")
     col.add_argument("--end", required=True, help="YYYY-MM-DD")
     col.add_argument("--market", choices=["Y", "K"], default=None, help="Y=KOSPI, K=KOSDAQ; default both")
-    col.add_argument("--documents", action="store_true", help="also download original documents (1 request each)")
+    col.add_argument("--documents", action="store_true",
+                     help="also download original documents for new_contract filings (1 request each)")
+    col.add_argument("--documents-all", action="store_true",
+                     help="with --documents: also fetch amendment/cancellation documents")
     col.add_argument("--max-requests", type=int, default=2000)
     col.add_argument("--interval", type=float, default=0.25, help="seconds between requests")
     col.add_argument("--raw", default=DEFAULT_RAW)

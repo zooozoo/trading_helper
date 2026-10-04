@@ -122,6 +122,13 @@ class OpenDartTests(unittest.TestCase):
         self.assertEqual(c.kind, "cancellation")
         c = od.classify_report_name("주요사항보고서(유상증자결정)")
         self.assertEqual((c.is_supply_contract, c.kind), (False, "other"))
+        # Real-data false positives: liquidity-provider contracts, free-text titles, halt notices, padding.
+        self.assertFalse(od.classify_report_name("유동성공급계약의체결").is_supply_contract)
+        self.assertFalse(od.classify_report_name("투자판단관련주요경영사항      (라이선스 및 공급계약 체결)").is_supply_contract)
+        c = od.classify_report_name("주권매매거래정지              (단일판매공급계약)")
+        self.assertEqual((c.is_supply_contract, c.kind), (False, "halt_notice"))
+        c = od.classify_report_name("단일판매ㆍ공급계약체결(자율공시)              ")
+        self.assertEqual((c.kind, c.voluntary), ("new_contract", True))
 
 
 if __name__ == "__main__":
