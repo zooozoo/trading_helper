@@ -313,6 +313,7 @@ AMEND_PREFIX = re.compile(r"^\s*\[(기재정정|첨부정정|첨부추가|변경
 SUPPLY_CONTRACT = re.compile(r"단일판매\s*[ㆍ·･\.]?\s*공급계약")
 HALT_NOTICE = re.compile(r"매매거래정지")
 CANCEL_WORDS = re.compile(r"해지|취소|철회|해제")
+MODIFY_WORDS = re.compile(r"변경계약|변경")
 # rm (비고) codes: 유 KOSPI, 코 KOSDAQ, 넥 KONEX, 채 bond, 공 KFTC, 연 consolidated,
 # 정 "amended later" (look-ahead!), 철 "withdrawn later" (look-ahead!).
 RM_LOOKAHEAD = {"정": "amended_later", "철": "withdrawn_later"}
@@ -351,12 +352,16 @@ def classify_report_name(report_nm: str, rm: str = "") -> Classification:
     supply = bool(SUPPLY_CONTRACT.search(core))
     if not supply:
         return Classification(False, "other", tag, "not a supply-contract report", flags, market)
+    if not core.startswith("단일판매"):
+        # e.g. "기타경영사항(자율공시)(단일판매ㆍ공급계약 진행상황)", "조회공시요구(...)", "불성실공시법인지정예고(...)":
+        # they reference a contract but are not the contract filing itself. Never a new event.
+        return Classification(False, "supply_related_other", tag, "mentions a supply contract; not the filing itself", flags, market)
     subsidiary = "자회사" in core
     voluntary = "자율공시" in core
     if CANCEL_WORDS.search(core):
         kind, note = "cancellation", "cancellation/withdrawal wording in report name"
-    elif tag:
-        kind, note = "amendment", f"{tag}: amendment; link to original before use"
+    elif tag or MODIFY_WORDS.search(core):
+        kind, note = "amendment", f"{tag or '변경계약'}: amendment; link to original before use"
     else:
         kind, note = "new_contract", "candidate; contract figures need document extraction"
     if subsidiary:

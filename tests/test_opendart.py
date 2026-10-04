@@ -142,6 +142,10 @@ class OpenDartTests(unittest.TestCase):
         self.assertFalse(od.classify_report_name("투자판단관련주요경영사항      (라이선스 및 공급계약 체결)").is_supply_contract)
         c = od.classify_report_name("주권매매거래정지              (단일판매공급계약)")
         self.assertEqual((c.is_supply_contract, c.kind), (False, "halt_notice"))
+        c = od.classify_report_name("기타경영사항(자율공시)(단일판매ㆍ공급계약 진행상황)")
+        self.assertEqual((c.is_supply_contract, c.kind), (False, "supply_related_other"))
+        self.assertFalse(od.classify_report_name("조회공시요구(단일판매ㆍ공급계약체결 보도)").is_supply_contract)
+        self.assertEqual(od.classify_report_name("단일판매ㆍ공급계약체결(변경계약)").kind, "amendment")
         c = od.classify_report_name("단일판매ㆍ공급계약체결(자율공시)              ")
         self.assertEqual((c.kind, c.voluntary), ("new_contract", True))
 
