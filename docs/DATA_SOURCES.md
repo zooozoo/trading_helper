@@ -104,6 +104,6 @@
 - 원본: `data/raw/opendart/{list,document}/` + `manifest.jsonl`(sha256, fetched_at, 마스킹된 요청).
 - 산출: `data/normalized/opendart_events.csv`(자동 통과분, `risk_approved=false`),
   `opendart_related.csv`(정정·해지 연결), `opendart_review_queue.csv`(전체 상태와 사유).
-- 실제 수집은 아직 실행하지 않았습니다. 키 발급 후 첫 실행에서 추출 규칙을 실제 원문으로 보정합니다.
+- 2016-01-01 ~ 2026-10-04 수집·정규화 완료. 기록: `docs/runs/2026-10-05_opendart_collection.md`.
 - 하루 한도 때문에 전체 기간 원문 수집은 며칠에 나눠야 할 수 있습니다. `--max-requests`로 제한하고
   이미 받은 원문은 건너뜁니다.
