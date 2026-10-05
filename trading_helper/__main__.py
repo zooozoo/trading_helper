@@ -10,6 +10,7 @@ from .validate import format_text, validate_all
 from . import opendart as od
 from . import datagokr as dg
 from . import weekly_v1 as wv
+from . import diagnostics as dx
 from .market import load_market
 from .opendart_normalize import normalize
 
@@ -171,6 +172,54 @@ def run_backtest_weekly(args):
     print(f"outputs: {out_dir}", file=sys.stderr)
 
 
+def run_diagnose_events(args):
+    import subprocess
+    segments = json.loads(Path(args.segments).read_text(encoding="utf-8"))
+    seg = segments[args.segment]
+    segment = (date.fromisoformat(seg["start"]), date.fromisoformat(seg["end"]))
+    market = load_market(args.normalized)
+    events = [e for e in wv.load_events(args.events) if e.event_type == "new_contract"]
+    proxy = dx.market_proxy(market, statistic=args.proxy)
+    # market caps on the base session (last close before reaction) for events in range
+    need = set()
+    for ev in events:
+        if ev.receipt_date < market.sessions[0]:
+            continue
+        r = market.next_session_after(ev.receipt_date)
+        if r is None or not segment[0] <= market.sessions[r] <= segment[1]:
+            continue
+        d_idx = market.index.get(ev.receipt_date)
+        base = (d_idx if d_idx is not None else r) - 1
+        if base >= 0:
+            need.add(market.sessions[base])
+    caps = dx.load_market_caps(Path(args.price_raw), need)
+    rows, funnel = dx.event_table(market, events, segment=segment, proxy=proxy, caps=caps,
+                                  min_turnover=args.min_turnover)
+    out_dir = Path(args.out) / args.exp
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dx.write_table(rows, out_dir / "event_table.csv")
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        commit = "unknown"
+    liquid_rows = [r for r in rows if r["liquid"]]
+    placebo = dx.placebo_rows(market, liquid_rows, proxy, min_turnover=args.min_turnover)
+    dx.write_table(placebo, out_dir / "placebo_table.csv")
+    report = {"labels": {"experiment": args.exp, "segment": args.segment, "segment_range": [seg["start"], seg["end"]],
+                         "risk_filter": "none", "market_proxy": f"equal_weight_{args.proxy}_daily_return_common_stocks",
+                         "placebo": "one random liquid common stock per event on the same reaction date (seed 7)",
+                         "data_kind": "REAL_DATA_DIAGNOSTIC_NO_PARAMETER_SEARCH", "git_commit": commit,
+                         "min_turnover_krw": args.min_turnover, "cap_dates_loaded": len(need), "caps_found": len(caps)},
+              "funnel": funnel,
+              "liquid": dx.summarize(rows, liquid_only=True),
+              "placebo_liquid": dx.summarize_placebo(placebo),
+              "all": dx.summarize(rows, liquid_only=False)}
+    (out_dir / "summary.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    print(json.dumps({"funnel": funnel, "n_liquid": report["liquid"]["n_events"], "n_all": report["all"]["n_events"]},
+                     ensure_ascii=False, indent=2))
+    print(f"outputs: {out_dir}", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="trading_helper", description="Unvalidated research starter")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -226,6 +275,17 @@ def main():
     bt.add_argument("--normalized", default="data/normalized")
     bt.add_argument("--out", default="outputs/experiments")
     bt.set_defaults(func=run_backtest_weekly)
+    dg_ = sub.add_parser("diagnose-events", help="parameter-free event study on the development segment")
+    dg_.add_argument("--exp", required=True, help="e.g. DIAG-01")
+    dg_.add_argument("--segment", choices=["development"], default="development")
+    dg_.add_argument("--min-turnover", type=float, default=1_000_000_000)
+    dg_.add_argument("--proxy", choices=["mean", "median"], default="mean")
+    dg_.add_argument("--segments", default="config/segments_v1.json")
+    dg_.add_argument("--events", default="data/normalized/opendart_events.csv")
+    dg_.add_argument("--normalized", default="data/normalized")
+    dg_.add_argument("--price-raw", default="data/raw/datagokr")
+    dg_.add_argument("--out", default="outputs/experiments")
+    dg_.set_defaults(func=run_diagnose_events)
     args = parser.parse_args()
     args.func(args)
 
