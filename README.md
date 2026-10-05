@@ -42,6 +42,12 @@ python -m trading_helper backtest-weekly --exp W1-A-02 --variant A --segment dev
 `--risk-filter none`은 재무 위험 필터를 끈 가설 단계 실행이며 결과에 그렇게 표시됩니다.
 실험 기록은 `docs/runs/`. 첫 실행(2026-10-06)에서 개발 구간 수익성 가설은 지지되지 않았습니다.
 
+`trading_helper/factor_v1.py` + `fundamentals_pit.py`: 월간 팩터 포트폴리오 엔진(사전 등록 `config/strategy_factor_v1.json`).
+
+```bash
+python -m trading_helper backtest-factor --exp F1-01 --segment development
+```
+
 ## 에이전트 사용
 
 1. Claude Code에서 `CLAUDE.md`, `AGENTS.md`, 전략·데이터 명세를 읽습니다.

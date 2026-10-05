@@ -114,6 +114,10 @@ class FactorEngineTests(unittest.TestCase):
         idx, ratio, method = actions.by_symbol["000010"][0]
         self.assertEqual((idx, ratio, method), (150, 2.0, "price_gap"))
         self.assertAlmostEqual(fv.period_return(m, "000010", 140, 170, actions), 0.0)
+        pol = fv.FactorPolicy("t", ("KOSPI",), 0.0, 130, 400, True, {"M": {"factors": ["mom_6_1"], "top_n": 1}}, 5, 5, 1e6)
+        feats = fv.compute_features(m, FakeFund({"000010": snap(1e9, 1e8, 1e8, 1e9)}), {"000010": 1e9}, 240, pol, actions)
+        self.assertAlmostEqual(feats["000010"]["mom_6_1"], 0.0, places=6)   # split-adjusted: flat, not -50%
+        self.assertLess(feats["000010"]["lowvol"], 0.01)                      # split day excluded from vol
         sel = [(140, 141, ["000010"])]
         res = fv.simulate(m, sel, COSTS, equity0=1_000_000, actions=actions, end_idx=260)
         self.assertEqual(res.flags["corporate_action_adjustments"], 1)

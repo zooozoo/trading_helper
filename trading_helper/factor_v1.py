@@ -109,8 +109,12 @@ def load_caps_for(raw_dir: Path, d: date) -> dict[str, float]:
     return out
 
 
-def compute_features(market: Market, fund, caps: dict[str, float], f_idx: int, policy: FactorPolicy) -> dict[str, dict]:
-    """Per-symbol factor values at session f_idx (None where not computable). Universe filters applied."""
+def compute_features(market: Market, fund, caps: dict[str, float], f_idx: int, policy: FactorPolicy,
+                     actions: "CorporateActions | None" = None) -> dict[str, dict]:
+    """Per-symbol factor values at session f_idx (None where not computable). Universe filters applied.
+
+    Momentum and volatility use share-count-adjusted returns (raw prices would make a 1:5 split look like
+    an -80% loser and a reverse split like a +400% winner)."""
     out = {}
     f_date = market.sessions[f_idx]
     for sym, sec in market.securities.items():
@@ -148,13 +152,20 @@ def compute_features(market: Market, fund, caps: dict[str, float], f_idx: int, p
             if c[i] == MISSING or c[i - 1] == MISSING or c[i - 1] <= 0:
                 ok = False
                 break
-            rets.append(c[i] / c[i - 1] - 1)
+            adj = actions.ratio_on(sym, i) if actions else 1.0
+            rets.append(c[i] * adj / c[i - 1] - 1)
         if ok and len(rets) >= 100:
             feats["lowvol"] = pstdev(rets)
-        if f_idx - 252 >= 0 and c[f_idx - 252] != MISSING and c[f_idx - 21] != MISSING:
-            feats["mom_12_1"] = c[f_idx - 21] / c[f_idx - 252] - 1
-        if f_idx - 126 >= 0 and c[f_idx - 126] != MISSING and c[f_idx - 21] != MISSING:
-            feats["mom_6_1"] = c[f_idx - 21] / c[f_idx - 126] - 1
+        if actions is not None:
+            if f_idx - 252 >= 0:
+                feats["mom_12_1"] = period_return(market, sym, f_idx - 252, f_idx - 21, actions)
+            if f_idx - 126 >= 0:
+                feats["mom_6_1"] = period_return(market, sym, f_idx - 126, f_idx - 21, actions)
+        else:
+            if f_idx - 252 >= 0 and c[f_idx - 252] != MISSING and c[f_idx - 21] != MISSING:
+                feats["mom_12_1"] = c[f_idx - 21] / c[f_idx - 252] - 1
+            if f_idx - 126 >= 0 and c[f_idx - 126] != MISSING and c[f_idx - 21] != MISSING:
+                feats["mom_6_1"] = c[f_idx - 21] / c[f_idx - 126] - 1
         out[sym] = feats
     return out
 
@@ -215,9 +226,10 @@ def simulate(market: Market, selections: list[tuple[int, int, list[str]]], costs
     curve, holdings, turnover = [], [], []
     flags = defaultdict(int)
     sel_at = {m: (f, syms) for f, m, syms in selections}
-    if not selections:
+    non_empty = [m for f, m, syms in selections if syms]
+    if not non_empty:
         return SimResult(curve, holdings, turnover, dict(flags), equity0)
-    start = selections[0][1]
+    start = non_empty[0]  # the curve starts at the first rebalance with an investable universe
     for i in range(start, end_idx + 1):
         today = market.sessions[i]
         year = today.year

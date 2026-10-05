@@ -324,7 +324,7 @@ def run_backtest_factor(args):
     for f, _ in rebs:
         caps = fv.load_caps_for(Path(args.price_raw), market.sessions[f])
         caps_found += bool(caps)
-        feats_by_f[f] = fv.compute_features(market, fund, caps, f, policy)
+        feats_by_f[f] = fv.compute_features(market, fund, caps, f, policy, actions)
     end_idx = min(len(market.sessions) - 1, market.next_session_after(segment[1]) or len(market.sessions) - 1)
     sims, report = {}, {}
     for name, spec in policy.portfolios.items():
@@ -361,9 +361,13 @@ def run_backtest_factor(args):
             series = ix.load_index_series(idx_path, nm)
             if series:
                 indexes[nm] = series
-    bench = {"equal_weight_universe_cost_free": {"months": len(ew), "cum_return": _m.prod(1 + r for r in ew) - 1 if ew else None,
+    # benchmarks over the same window as the simulations (first rebalance with a non-empty universe)
+    sim_start = min((s.equity_curve[0][0] for s in sims.values() if s.equity_curve), default=market.sessions[rebs[0][1]])
+    sim_end = max((s.equity_curve[-1][0] for s in sims.values() if s.equity_curve), default=market.sessions[end_idx])
+    bench = {"window": [sim_start.isoformat(), sim_end.isoformat()],
+             "equal_weight_universe_cost_free": {"months": len(ew), "cum_return": _m.prod(1 + r for r in ew) - 1 if ew else None,
                                                  "avg_monthly": (sum(ew) / len(ew)) if ew else None},
-             **{nm: fv.index_stats(series, market.sessions[rebs[0][1]], market.sessions[end_idx]) for nm, series in indexes.items()}}
+             **{nm: fv.index_stats(series, sim_start, sim_end) for nm, series in indexes.items()}}
     try:
         commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
     except Exception:
