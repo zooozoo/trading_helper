@@ -11,6 +11,7 @@ from . import opendart as od
 from . import datagokr as dg
 from . import weekly_v1 as wv
 from . import diagnostics as dx
+from . import screen as sc
 from .market import load_market
 from .opendart_normalize import normalize
 
@@ -84,8 +85,16 @@ def run_dart_collect(args):
     client.fetcher = counting_fetcher
     summary = {"start": args.start, "end": args.end, "corp_cls": args.market, "raw": str(store.root)}
     try:
-        rows = od.search_supply_contract_filings(client, bgn, end, corp_cls=args.market)
-        summary["supply_contract_filings"] = len(rows)
+        if args.pblntf_ty:
+            rows = od.search_filings(client, bgn, end, pblntf_ty=args.pblntf_ty, pblntf_detail_ty=args.detail_ty,
+                                     corp_cls=args.market, last_reprt_at="N")
+            summary["list_rows"] = len(rows)
+            summary["filter"] = {"pblntf_ty": args.pblntf_ty, "pblntf_detail_ty": args.detail_ty}
+            if args.documents:
+                raise od.OpenDartError("--documents is only supported for the supply-contract default filter")
+        else:
+            rows = od.search_supply_contract_filings(client, bgn, end, corp_cls=args.market)
+            summary["supply_contract_filings"] = len(rows)
         if args.documents:
             fetched = skipped = 0
             wanted = [r for r in rows if args.documents_all
@@ -220,6 +229,36 @@ def run_diagnose_events(args):
     print(f"outputs: {out_dir}", file=sys.stderr)
 
 
+def run_screen_events(args):
+    import subprocess
+    segments = json.loads(Path(args.segments).read_text(encoding="utf-8"))
+    seg = segments[args.segment]
+    segment = (date.fromisoformat(seg["start"]), date.fromisoformat(seg["end"]))
+    types = sc.load_type_config(args.types)
+    if args.only:
+        types = {k: v for k, v in types.items() if k in set(args.only.split(","))}
+    store = od.RawStore(Path(args.raw))
+    events_by_type, ext_stats = sc.extract_events(store, types, min_date=date(2019, 12, 1))
+    market = load_market(args.normalized)
+    proxy = dx.market_proxy(market, statistic="mean")
+    report = sc.screen(market, events_by_type, segment=segment, proxy=proxy, min_turnover=args.min_turnover)
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        commit = "unknown"
+    out_dir = Path(args.out) / args.exp
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = {"labels": {"experiment": args.exp, "segment": args.segment, "segment_range": [seg["start"], seg["end"]],
+                          "types_config": args.types, "git_commit": commit, "min_turnover_krw": args.min_turnover,
+                          "data_kind": "REAL_DATA_SCREEN_NO_PARAMETER_SEARCH", "risk_filter": "none"},
+               "extraction": ext_stats, "report": report}
+    (out_dir / "summary.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    table = sc.markdown_table(report, types)
+    (out_dir / "table.md").write_text(table + "\n", encoding="utf-8")
+    print(table)
+    print(f"outputs: {out_dir}", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="trading_helper", description="Unvalidated research starter")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -243,6 +282,8 @@ def main():
     col.add_argument("--max-requests", type=int, default=2000)
     col.add_argument("--interval", type=float, default=0.25, help="seconds between requests")
     col.add_argument("--raw", default=DEFAULT_RAW)
+    col.add_argument("--pblntf-ty", default=None, help="collect raw lists of another type instead (e.g. B)")
+    col.add_argument("--detail-ty", default=None, help="with --pblntf-ty, e.g. B001 주요사항보고서")
     col.set_defaults(func=run_dart_collect)
     nrm = sub.add_parser("dart-normalize", help="build events/related/review CSVs from raw OpenDART store")
     nrm.add_argument("--raw", default=DEFAULT_RAW)
@@ -286,6 +327,17 @@ def main():
     dg_.add_argument("--price-raw", default="data/raw/datagokr")
     dg_.add_argument("--out", default="outputs/experiments")
     dg_.set_defaults(func=run_diagnose_events)
+    scn = sub.add_parser("screen-events", help="multi-type title-based event screen (development segment)")
+    scn.add_argument("--exp", required=True, help="e.g. SCREEN-01")
+    scn.add_argument("--types", default="config/event_types_screen_v1.json")
+    scn.add_argument("--only", default=None, help="comma-separated subset of type names")
+    scn.add_argument("--segment", choices=["development"], default="development")
+    scn.add_argument("--min-turnover", type=float, default=1_000_000_000)
+    scn.add_argument("--segments", default="config/segments_v1.json")
+    scn.add_argument("--raw", default=DEFAULT_RAW)
+    scn.add_argument("--normalized", default=DEFAULT_NORMALIZED)
+    scn.add_argument("--out", default="outputs/experiments")
+    scn.set_defaults(func=run_screen_events)
     args = parser.parse_args()
     args.func(args)
 

@@ -1,0 +1,27 @@
+{
+  "status": "PRE_REGISTERED_SCREEN_2026-10-06",
+  "note": "Title-based event types for a parameter-free screen on the development segment. 'title' is a regex on the cleaned report name (prefix like [기재정정] removed, whitespace collapsed). Amended filings are excluded; one event per (symbol, type, receipt date). 'expected' is the pre-registered direction hypothesis (long-only project: only 'positive' types can become strategies; 'negative' types are screened as exclusion/awareness signals).",
+  "types": {
+    "supply_contract": {"title": "^단일판매ㆍ공급계약체결", "expected": "positive", "source": "I001"},
+    "share_cancellation": {"title": "^주식소각결정", "expected": "positive", "source": "I001"},
+    "new_facility_investment": {"title": "^신규시설투자등", "expected": "positive", "source": "I001"},
+    "equity_stake_acquisition": {"title": "^타법인주식및출자증권취득결정", "expected": "positive", "source": "I001"},
+    "largest_shareholder_change": {"title": "^최대주주변경$", "expected": "unknown", "source": "I001"},
+    "cash_dividend_decision": {"title": "^현금ㆍ현물배당결정", "expected": "positive", "source": "I001"},
+    "value_up_plan": {"title": "^기업가치제고계획", "expected": "positive", "source": "I001"},
+    "inquiry_disclosure_request": {"title": "^조회공시요구", "expected": "unknown", "source": "I001"},
+    "rumor_clarification": {"title": "^풍문또는보도에대한해명", "expected": "unknown", "source": "I001"},
+    "key_matter_patent": {"title": "^투자판단관련주요경영사항", "paren": "특허", "expected": "positive", "source": "I001"},
+    "key_matter_clinical_approval": {"title": "^투자판단관련주요경영사항", "paren": "임상|승인|허가", "expected": "positive", "source": "I001"},
+    "key_matter_license_tech": {"title": "^투자판단관련주요경영사항", "paren": "라이선스|기술이전|기술수출|License", "expected": "positive", "source": "I001"},
+    "key_matter_order_contract": {"title": "^투자판단관련주요경영사항", "paren": "수주|계약|공급", "expected": "positive", "source": "I001"},
+    "bonus_issue": {"title": "^주요사항보고서\\(무상증자결정\\)", "expected": "positive", "source": "B001"},
+    "treasury_buyback": {"title": "^주요사항보고서\\(자기주식취득결정\\)", "expected": "positive", "source": "B001"},
+    "treasury_trust_contract": {"title": "^주요사항보고서\\(자기주식취득신탁계약체결결정\\)", "expected": "positive", "source": "B001"},
+    "stock_split": {"title": "^주요사항보고서\\(주식분할결정\\)", "expected": "positive", "source": "B001"},
+    "rights_issue": {"title": "^주요사항보고서\\(유상증자결정\\)", "expected": "negative", "source": "B001"},
+    "convertible_bond": {"title": "^주요사항보고서\\(전환사채권발행결정\\)", "expected": "negative", "source": "B001"},
+    "capital_reduction": {"title": "^주요사항보고서\\(감자결정\\)", "expected": "negative", "source": "B001"},
+    "merger_decision": {"title": "^주요사항보고서\\(회사합병결정\\)", "expected": "unknown", "source": "B001"}
+  }
+}

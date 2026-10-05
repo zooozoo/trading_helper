@@ -123,7 +123,7 @@ def bucket(value: float | None, edges) -> str:
 
 def event_table(market: Market, events: list[EventRow], *, segment: tuple[date, date], proxy: list[float],
                 caps: dict[tuple[str, date], float], min_turnover: float, lookback: int = 20,
-                volume_multiple: float = 1.5) -> tuple[list[dict], dict]:
+                volume_multiple: float = 1.5, require_revenue: bool = True) -> tuple[list[dict], dict]:
     rows, funnel = [], defaultdict(int)
     n = len(market.sessions)
     for ev in events:
@@ -132,7 +132,7 @@ def event_table(market: Market, events: list[EventRow], *, segment: tuple[date, 
         if sec is None or not sec.is_common:
             funnel["skip:not_common_or_unknown"] += 1
             continue
-        if ev.annual_revenue <= 0:
+        if require_revenue and ev.annual_revenue <= 0:
             funnel["skip:no_revenue"] += 1
             continue
         if ev.receipt_date < market.sessions[0]:
@@ -165,11 +165,12 @@ def event_table(market: Market, events: list[EventRow], *, segment: tuple[date, 
         row = {
             "event_id": ev.event_id, "symbol": ev.symbol, "market": sec.market, "receipt_date": ev.receipt_date.isoformat(),
             "receipt_is_session": d_idx is not None, "reaction_date": market.sessions[r].isoformat(),
-            "contract_to_revenue": ev.contract_amount / ev.annual_revenue, "liquid": liquid,
+            "contract_to_revenue": (ev.contract_amount / ev.annual_revenue) if ev.annual_revenue > 0 else None,
+            "liquid": liquid,
             "avg_turnover_krw": turnover,
         }
         cap = caps.get((ev.symbol, market.sessions[base]))
-        row["contract_to_mktcap"] = ev.contract_amount / cap if cap else None
+        row["contract_to_mktcap"] = (ev.contract_amount / cap) if (cap and ev.contract_amount > 0) else None
         row["mktcap_krw"] = cap
         # pre-event run-up (abnormal) over the 20 sessions ending at base
         row["runup_20_abn"] = (c[base] / c[base - lookback] - 1) - _cum(proxy, base - lookback, base)
@@ -201,7 +202,8 @@ def event_table(market: Market, events: list[EventRow], *, segment: tuple[date, 
         row["bucket_cap_ratio"] = bucket(row["contract_to_mktcap"], CAP_RATIO_BUCKETS)
         row["bucket_runup"] = bucket(row["runup_20_abn"], RUNUP_BUCKETS)
         row["bucket_regime"] = "mkt_up_20d" if row["mkt_20d_before"] > 0 else "mkt_down_20d"
-        row["bucket_rev_ratio"] = ">=5%" if row["contract_to_revenue"] >= 0.05 else "<5%"
+        rr = row["contract_to_revenue"]
+        row["bucket_rev_ratio"] = "n/a" if rr is None else (">=5%" if rr >= 0.05 else "<5%")
         row["breakout_and_volume"] = bool(row["breakout_at_r"] and row["volume_ok_at_r"])
         rows.append(row)
         funnel["rows"] += 1
