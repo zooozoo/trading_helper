@@ -9,6 +9,8 @@ from .rules import Bar, Costs, Event, Policy, plan_entry, signal_at_close
 from .validate import format_text, validate_all
 from . import opendart as od
 from . import datagokr as dg
+from . import weekly_v1 as wv
+from .market import load_market
 from .opendart_normalize import normalize
 
 DEFAULT_RAW = "data/raw/opendart"
@@ -130,6 +132,45 @@ def run_prices_normalize(args):
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
+def run_backtest_weekly(args):
+    import hashlib
+    import platform
+    import subprocess
+    segments = json.loads(Path(args.segments).read_text(encoding="utf-8"))
+    seg = segments[args.segment]
+    segment = (date.fromisoformat(seg["start"]), date.fromisoformat(seg["end"]))
+    overrides = {"signal_variant": args.variant}
+    if args.baseline == "events_only":
+        overrides.update(require_breakout=False, require_volume=False)
+    policy = wv.WeeklyPolicy.load(args.config, **overrides)
+    costs = wv.CostTable.load(args.costs)
+    market = load_market(args.normalized)
+    events = wv.load_events(args.events)
+    signals, funnel = wv.generate_signals(market, events, policy, segment=segment, risk_filter=args.risk_filter)
+    result = wv.run_portfolio(market, signals, policy, costs, equity0=args.equity, funnel=funnel)
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        commit = "unknown"
+    sha = lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()[:16]
+    result.labels = {
+        "experiment": args.exp, "strategy": policy.strategy_id, "variant": policy.signal_variant, "baseline": args.baseline,
+        "segment": args.segment, "segment_range": [seg["start"], seg["end"]],
+        "risk_filter": args.risk_filter,
+        "RISK_FILTER_NOT_APPLIED": args.risk_filter == "none",
+        "data_kind": "REAL_DATA_HYPOTHESIS_STAGE_NOT_VALIDATED",
+        "costs_status": costs.status, "equity0": args.equity,
+        "git_commit": commit, "python": platform.python_version(),
+        "hashes": {"events": sha(args.events), "prices": sha(Path(args.normalized) / "prices.csv"),
+                   "config": sha(args.config), "costs": sha(args.costs), "segments": sha(args.segments)},
+    }
+    summary = wv.summarize(result)
+    out_dir = Path(args.out) / args.exp
+    wv.write_outputs(result, summary, out_dir)
+    print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
+    print(f"outputs: {out_dir}", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="trading_helper", description="Unvalidated research starter")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -169,6 +210,22 @@ def main():
     pn.add_argument("--raw", default=DEFAULT_PRICE_RAW)
     pn.add_argument("--out", default=DEFAULT_NORMALIZED)
     pn.set_defaults(func=run_prices_normalize)
+    bt = sub.add_parser("backtest-weekly", help="weekly_execution_v1 backtest on normalized real data (hypothesis stage)")
+    bt.add_argument("--exp", required=True, help="experiment id, e.g. W1-A-01")
+    bt.add_argument("--segment", choices=["development", "validation", "final"], default="development")
+    bt.add_argument("--risk-filter", choices=list(wv.RISK_FILTER_MODES), default="approved_only",
+                    help="'none' runs without the financial-risk filter and is labeled as such")
+    bt.add_argument("--baseline", choices=["none", "events_only"], default="none")
+    bt.add_argument("--variant", choices=["A", "B"], default="A",
+                    help="A: reaction day must be week end (strict); B: breakout judged at week end")
+    bt.add_argument("--equity", type=float, default=10_000_000)
+    bt.add_argument("--config", default="config/strategy_weekly_v1.json")
+    bt.add_argument("--costs", default="config/costs_kr_assumed.json")
+    bt.add_argument("--segments", default="config/segments_v1.json")
+    bt.add_argument("--events", default="data/normalized/opendart_events.csv")
+    bt.add_argument("--normalized", default="data/normalized")
+    bt.add_argument("--out", default="outputs/experiments")
+    bt.set_defaults(func=run_backtest_weekly)
     args = parser.parse_args()
     args.func(args)
 

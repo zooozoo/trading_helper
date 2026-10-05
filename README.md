@@ -33,8 +33,14 @@ python -m trading_helper demo
 `docs/LIVE_RECONCILIATION.md`: 체결 기록(`data/templates/trades.csv`)으로 계획 대 실제를 대조하는 규칙과
 전략 수정 허용 조건. 실거래 손익으로 파라미터를 직접 바꾸지 않습니다.
 
-전체 포트폴리오 백테스트, 수집기, 주간 리포트, 예약 실행은 다음 작업입니다.
-단일 거래 계산 함수를 전체 백테스트 엔진으로 착각하지 마세요.
+`trading_helper/weekly_v1.py` + `market.py`: 주간 모드 포트폴리오 백테스트 엔진. 실행:
+
+```bash
+python -m trading_helper backtest-weekly --exp W1-A-02 --variant A --segment development --risk-filter none
+```
+
+`--risk-filter none`은 재무 위험 필터를 끈 가설 단계 실행이며 결과에 그렇게 표시됩니다.
+실험 기록은 `docs/runs/`. 첫 실행(2026-10-06)에서 개발 구간 수익성 가설은 지지되지 않았습니다.
 
 ## 에이전트 사용
 
