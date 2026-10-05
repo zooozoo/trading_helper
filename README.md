@@ -66,7 +66,8 @@ python -m trading_helper validate --events data/normalized/opendart_events.csv
 
 - (완료) 공급자 조사, OpenDART 수집기·정규화, 입력 검증기
 - OpenDART 키 발급 후 실제 수집 실행, 추출 규칙을 실제 원문으로 보정
-- 가격·거래일·상장폐지 데이터 출처 확정(사용 조건 확인 후) 및 수집
+- (완료) 시세 2020~2026 수집(`prices-collect`, `prices-normalize`). 2016~2019는 미사용
+- 공식 휴장일 교차 확인, 액면분할 보정 규칙
 - 실적·재무 위험 자료를 당시 공개 시점별로 정규화
 - 거래정지·가격제한·기업행동을 처리하는 포트폴리오 백테스트 구현
 - 고정한 시간순 개발/검증/최종 평가 구간에서 비용 포함 성과 계산
