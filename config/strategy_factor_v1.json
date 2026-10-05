@@ -1,0 +1,42 @@
+{
+  "strategy_id": "kr_factor_monthly_v1",
+  "status": "PRE_REGISTERED_2026-10-06_UNVALIDATED_HYPOTHESIS",
+  "note": "Monthly long-only factor portfolio. Decision uses information through the last session of the month (F); orders fill at the first session of the next month (M) open. Everything below is fixed before the first run; changes require a new version/experiment id.",
+  "universe": {
+    "markets": ["KOSPI", "KOSDAQ"],
+    "common_stock_only": true,
+    "min_avg_turnover_krw_20d": 1000000000,
+    "min_price_history_sessions": 130,
+    "max_fundamental_age_days": 400,
+    "exclude_negative_book_equity": true,
+    "exclude_if_no_market_cap": true
+  },
+  "factors": {
+    "bp": {"desc": "book equity (latest 자본총계, CFS preferred) / market cap", "direction": "high_is_good"},
+    "ep": {"desc": "TTM 당기순이익 (sum of last 4 quarterly 3-month figures) / market cap", "direction": "high_is_good"},
+    "roe": {"desc": "TTM 당기순이익 / latest book equity", "direction": "high_is_good"},
+    "opm": {"desc": "TTM 영업이익 / TTM 매출액", "direction": "high_is_good"},
+    "lowvol": {"desc": "std of daily close returns over last 120 sessions", "direction": "low_is_good"},
+    "mom_12_1": {"desc": "close[F-21] / close[F-252] - 1 (skip last month)", "direction": "high_is_good"},
+    "mom_6_1": {"desc": "close[F-21] / close[F-126] - 1", "direction": "high_is_good"},
+    "size": {"desc": "log market cap (reference only)", "direction": "low_is_good"}
+  },
+  "portfolios": {
+    "VQL_top20": {"factors": ["bp", "ep", "roe", "opm", "lowvol"], "top_n": 20},
+    "VALUE_top20": {"factors": ["bp", "ep"], "top_n": 20},
+    "QUALITY_top20": {"factors": ["roe", "opm"], "top_n": 20},
+    "LOWVOL_top20": {"factors": ["lowvol"], "top_n": 20},
+    "MOM_top20": {"factors": ["mom_12_1"], "top_n": 20}
+  },
+  "composite": "equal-weighted average of cross-sectional percentile ranks (missing factor -> stock excluded)",
+  "weighting": "equal weight, full rebalance to target at M open",
+  "rebalance": "first session of each calendar month",
+  "corporate_actions": "listed-share-count changes >=1.5x or <=0.67x applied to holdings at the matching price-gap date (ex-date) or the share-change date",
+  "delisting": "position exits at the last session with a bar (정리매매 included) at that close",
+  "benchmarks": ["코스피", "코스닥", "equal_weight_universe_monthly_no_cost", "random_top_n_draws"],
+  "random_draws": 200,
+  "quintiles": 5,
+  "costs": "config/costs_kr_assumed.json",
+  "equity0": 10000000,
+  "risk_filter": "negative book equity excluded; no other financial-risk review (label runs accordingly)"
+}

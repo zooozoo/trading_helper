@@ -105,15 +105,19 @@ class DataGoKrTests(unittest.TestCase):
         self.assertEqual((c["trading_days"], c["no_row_weekdays"], c["price_rows"], c["halt_rows"]), (2, 1, 4, 1))
         self.assertEqual(c["share_count_changes"], 1)
         self.assertTrue(validate_prices(out / "prices.csv").ok)
-        secs = {r["symbol"]: r for r in csv.DictReader(open(out / "securities.csv", encoding="utf-8"))}
+        with open(out / "securities.csv", encoding="utf-8") as fh:
+            secs = {r["symbol"]: r for r in csv.DictReader(fh)}
         self.assertEqual(secs["000020"]["is_common_stock"], "false")
         self.assertEqual(secs["000010"]["sessions"], "2")
         self.assertEqual(secs["000030"]["last_seen"], "2024-01-04")
-        change = list(csv.DictReader(open(out / "share_count_changes.csv", encoding="utf-8")))[0]
+        with open(out / "share_count_changes.csv", encoding="utf-8") as fh:
+            change = list(csv.DictReader(fh))[0]
         self.assertEqual((change["symbol"], change["ratio"][:3], change["note"]), ("000010", "5.0", "split_or_merge_candidate"))
-        halt = list(csv.DictReader(open(out / "halts.csv", encoding="utf-8")))[0]
+        with open(out / "halts.csv", encoding="utf-8") as fh:
+            halt = list(csv.DictReader(fh))[0]
         self.assertEqual((halt["symbol"], halt["date"]), ("000030", "2024-01-02"))
-        cal = [r["status"] for r in csv.DictReader(open(out / "calendar.csv", encoding="utf-8"))]
+        with open(out / "calendar.csv", encoding="utf-8") as fh:
+            cal = [r["status"] for r in csv.DictReader(fh)]
         self.assertEqual(cal, ["trading_day", "no_rows_holiday_or_missing", "trading_day"])
 
 

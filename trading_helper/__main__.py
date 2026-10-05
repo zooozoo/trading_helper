@@ -14,6 +14,8 @@ from . import diagnostics as dx
 from . import screen as sc
 from . import fundamentals as fd
 from . import indexes as ix
+from . import factor_v1 as fv
+from .fundamentals_pit import Fundamentals
 from .market import load_market
 from .opendart_normalize import normalize
 
@@ -303,6 +305,83 @@ def run_index_collect(args):
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
+def run_backtest_factor(args):
+    import hashlib
+    import platform
+    import subprocess
+    segments = json.loads(Path(args.segments).read_text(encoding="utf-8"))
+    seg = segments[args.segment]
+    segment = (date.fromisoformat(seg["start"]), date.fromisoformat(seg["end"]))
+    policy = fv.FactorPolicy.load(args.config)
+    costs = wv.CostTable.load(args.costs)
+    market = load_market(args.normalized)
+    fund = Fundamentals(Path(args.normalized) / "fundamentals.csv")
+    actions = fv.CorporateActions(market)
+    rebs = fv.month_rebalances(market, segment)
+    if not rebs:
+        sys.exit("no rebalance dates in segment")
+    feats_by_f, caps_found = {}, 0
+    for f, _ in rebs:
+        caps = fv.load_caps_for(Path(args.price_raw), market.sessions[f])
+        caps_found += bool(caps)
+        feats_by_f[f] = fv.compute_features(market, fund, caps, f, policy)
+    end_idx = min(len(market.sessions) - 1, market.next_session_after(segment[1]) or len(market.sessions) - 1)
+    sims, report = {}, {}
+    for name, spec in policy.portfolios.items():
+        selections, chosen_by_f, elig_by_f = [], {}, {}
+        for f, m in rebs:
+            scores = fv.composite_scores(feats_by_f[f], spec["factors"])
+            elig_by_f[f] = sorted(scores)
+            top = fv.select_top(scores, spec["top_n"])
+            chosen_by_f[f] = top
+            selections.append((f, m, top))
+        sim = fv.simulate(market, selections, costs, equity0=policy.equity0, actions=actions, end_idx=end_idx)
+        sims[name] = sim
+        report[name] = {"factors": spec["factors"], "top_n": spec["top_n"],
+                        "avg_eligible": sum(len(v) for v in elig_by_f.values()) / len(elig_by_f),
+                        "with_costs": fv.curve_stats(sim.equity_curve, policy.equity0),
+                        "avg_turnover_per_rebalance": (sum(sim.turnover) / len(sim.turnover)) if sim.turnover else None,
+                        "flags": sim.flags,
+                        "random_draw_test_cost_free": fv.random_draw_test(market, rebs, elig_by_f, chosen_by_f, actions,
+                                                                          draws=policy.random_draws, top_n=spec["top_n"])}
+    quintiles = {f: fv.quintile_table(market, rebs, feats_by_f, f, actions, policy.quintiles) for f in policy.raw["factors"]}
+    # equal-weight universe (cost-free, F->F) and index benchmarks
+    ew = []
+    for k in range(len(rebs) - 1):
+        f, f_next = rebs[k][0], rebs[k + 1][0]
+        rets = [fv.period_return(market, s, f, f_next, actions) for s in feats_by_f[f]]
+        rets = [r for r in rets if r is not None]
+        if rets:
+            ew.append(sum(rets) / len(rets))
+    import math as _m
+    indexes = {}
+    idx_path = Path(args.normalized) / "indexes.csv"
+    if idx_path.exists():
+        for nm in ("코스피", "코스닥", "코스피 소형주", "코스닥 소형주"):
+            series = ix.load_index_series(idx_path, nm)
+            if series:
+                indexes[nm] = series
+    bench = {"equal_weight_universe_cost_free": {"months": len(ew), "cum_return": _m.prod(1 + r for r in ew) - 1 if ew else None,
+                                                 "avg_monthly": (sum(ew) / len(ew)) if ew else None},
+             **{nm: fv.index_stats(series, market.sessions[rebs[0][1]], market.sessions[end_idx]) for nm, series in indexes.items()}}
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        commit = "unknown"
+    sha = lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()[:16]
+    summary = {"labels": {"experiment": args.exp, "strategy": policy.strategy_id, "segment": args.segment,
+                          "segment_range": [seg["start"], seg["end"]], "rebalances": len(rebs), "caps_dates_found": caps_found,
+                          "data_kind": "REAL_DATA_HYPOTHESIS_STAGE_NOT_VALIDATED", "risk_filter": policy.raw.get("risk_filter"),
+                          "costs_status": costs.status, "git_commit": commit, "python": platform.python_version(),
+                          "hashes": {"config": sha(args.config), "costs": sha(args.costs), "prices": sha(Path(args.normalized) / "prices.csv"),
+                                     "fundamentals": sha(Path(args.normalized) / "fundamentals.csv")}},
+               "portfolios": report, "quintiles": quintiles, "benchmarks": bench}
+    out_dir = Path(args.out) / args.exp
+    fv.write_outputs(out_dir, summary, sims, {k: {d: v for d, v in s.items()} for k, s in indexes.items()})
+    print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
+    print(f"outputs: {out_dir}", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="trading_helper", description="Unvalidated research starter")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -401,6 +480,16 @@ def main():
     ic.add_argument("--raw", default=DEFAULT_PRICE_RAW)
     ic.add_argument("--out", default=str(Path(DEFAULT_NORMALIZED) / "indexes.csv"))
     ic.set_defaults(func=run_index_collect)
+    bf = sub.add_parser("backtest-factor", help="kr_factor_monthly_v1 on normalized real data (hypothesis stage)")
+    bf.add_argument("--exp", required=True, help="e.g. F1-01")
+    bf.add_argument("--segment", choices=["development", "validation", "final"], default="development")
+    bf.add_argument("--config", default="config/strategy_factor_v1.json")
+    bf.add_argument("--costs", default="config/costs_kr_assumed.json")
+    bf.add_argument("--segments", default="config/segments_v1.json")
+    bf.add_argument("--normalized", default=DEFAULT_NORMALIZED)
+    bf.add_argument("--price-raw", default=DEFAULT_PRICE_RAW)
+    bf.add_argument("--out", default="outputs/experiments")
+    bf.set_defaults(func=run_backtest_factor)
     args = parser.parse_args()
     args.func(args)
 
