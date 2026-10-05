@@ -336,12 +336,39 @@ def normalize(store: RawStore, out_dir: Path) -> dict:
     _write_csv(out_dir / "opendart_events.csv", EVENT_COLUMNS, events)
     _write_csv(out_dir / "opendart_related.csv", RELATED_COLUMNS, related)
     _write_csv(out_dir / "opendart_review_queue.csv", REVIEW_COLUMNS, review)
-    summary = {"counts": counts, "outputs": [str(out_dir / n) for n in
-                                             ("opendart_events.csv", "opendart_related.csv", "opendart_review_queue.csv")],
+    summary = {"counts": counts, "breakdown": breakdown(review, related),
+               "outputs": [str(out_dir / n) for n in
+                           ("opendart_events.csv", "opendart_related.csv", "opendart_review_queue.csv")],
                "note": "events rows have risk_approved=false; signals require manual risk review with sources"}
     (out_dir / "opendart_normalize_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     return summary
+
+
+def breakdown(review: list[dict], related: list[dict]) -> dict:
+    """Reproducible stats for reports: by year/status, by reason, basis hints, related kinds."""
+    by_year: dict[str, dict[str, int]] = {}
+    reasons: dict[str, int] = {}
+    basis: dict[str, int] = {}
+    for r in review:
+        y = r["receipt_date"][:4]
+        by_year.setdefault(y, {})
+        by_year[y][r["status"]] = by_year[y].get(r["status"], 0) + 1
+        for item in (r.get("reasons") or "").split(";"):
+            if item:
+                key = item.split("=")[0].split(":")[0].split(" ")[0]
+                reasons[key] = reasons.get(key, 0) + 1
+        if r.get("document_path"):
+            hint = r.get("revenue_basis_hint") or "none"
+            basis[hint] = basis.get(hint, 0) + 1
+    related_kinds: dict[str, int] = {}
+    for r in related:
+        related_kinds[r["kind"]] = related_kinds.get(r["kind"], 0) + 1
+    linked = sum(1 for r in related if r["linked_original_rcept_no"])
+    return {"by_year_status": dict(sorted(by_year.items())),
+            "review_reasons": dict(sorted(reasons.items(), key=lambda kv: -kv[1])),
+            "revenue_basis_hint_with_document": basis,
+            "related_kinds": related_kinds, "related_linked": linked, "related_unlinked": len(related) - linked}
 
 
 def _fmt(value, digits: int = 0):

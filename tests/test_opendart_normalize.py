@@ -155,6 +155,10 @@ class NormalizeTests(unittest.TestCase):
         summary = nz.normalize(self.store, self.root / "norm")
         self.assertEqual(summary["counts"], {"filings": 5, "events_auto": 1, "review": 2, "related": 2,
                                              "missing_document": 1})
+        self.assertEqual(summary["breakdown"]["by_year_status"]["2024"],
+                         {"auto_ok_pending_risk_review": 1, "needs_review": 1, "needs_document": 1})
+        self.assertEqual(summary["breakdown"]["related_linked"], 1)
+        self.assertIn("contract_amount_not_parsed", summary["breakdown"]["review_reasons"])
         events = self.read("opendart_events.csv")
         self.assertEqual(len(events), 1)
         e = events[0]
