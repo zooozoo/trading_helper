@@ -56,7 +56,34 @@
 - v0/v1의 `annual_revenue`는 우선 공시 원문의 "최근 매출액"(공시 시점에 공개된 값)을 쓰고
   `revenue_available_date = 접수일`로 둡니다. 연결/별도 기준은 수동 확인 항목입니다.
 
-## 2. 시세·거래일·상장폐지 (미확정, 사용자 결정 필요)
+## 2. 시세: 공공데이터포털 금융위원회_주식시세정보 (채택, 2026-10-05 실측)
+
+API 페이지: https://www.data.go.kr/data/15094808/openapi.do
+엔드포인트(실측): `https://apis.data.go.kr/1160100/GetStockSecuritiesInfoService_V2/getStockPriceInfo_V2`
+(페이지의 구버전 주소 `.../service/GetStockSecuritiesInfoService/...`는 "등록되지 않은 서비스키"로 거부됨)
+
+- 키: 회원가입 후 활용신청(자동 승인). 환경변수 `DATA_GO_KR_API_KEY`로만 읽음. 개발계정 하루 10,000건.
+- 라이선스: KOGL 4유형(출처표시·**비상업**·변경금지). 개인 연구용으로만 사용. 재배포 금지.
+- 호출 방식: `basDt`(일자) 하나로 그날 **전 종목** 조회. `numOfRows=10000`이면 한 페이지(약 2,500~2,800행).
+  거래일 하나당 요청 1회. 2020~2026 전체 약 1,760회.
+- 필드: basDt, srtnCd(6자리 종목코드), isinCd, itmsNm, mrktCtg(KOSPI/KOSDAQ/KONEX), clpr(종가), mkp(시가),
+  hipr(고가), lopr(저가), trqu(거래량), trPrc(거래대금), lstgStCnt(상장주식수), mrktTotAmt(시가총액).
+- **데이터 시작: 2020-01-02.** 2019년 이전은 0행. 따라서 2016~2019년 공시는 이 출처로 가격을 붙일 수 없음.
+- **원주가(미수정)**: 카카오 2021-04-15 액면분할 전후 종가 558,000 → 120,500, 상장주식수 5배. 보정은 엔진에서
+  상장주식수 변화와 공시로 처리해야 함.
+- **상장폐지 종목 포함**: 일별 스냅샷이라 당시 상장 종목이 그대로 나옴(오스템임플란트 2022 있음, 2024 없음).
+  생존 편향이 이 범위에서는 해소됨.
+- ETF·ETN 없음. **우선주·스팩은 포함**되므로 ISIN 9번째 문자(0=보통주)와 종목명으로 제외.
+- 휴장일은 0행. **거래정지 종목은 행이 있되 시가·고가·저가·거래량이 0**이고 종가는 직전 종가.
+  정규화기는 이를 `halts.csv`로 분리하고 `prices.csv`에 넣지 않음.
+- 평일인데 0행인 날은 휴장 또는 결측. 공식 휴장일 목록(open.krx)과 교차 확인 전에는 캘린더로 확정하지 않음.
+- 기업행동(배당·증자 세부)은 없음. 2020-04 이후는 `주식권리일정정보` API(15059609)로 보완 가능.
+
+수집기: `python -m trading_helper prices-collect --start 2020-01-02 --end <date>`,
+정규화: `python -m trading_helper prices-normalize` → `data/normalized/prices.csv`, `securities.csv`,
+`calendar.csv`, `halts.csv`, `share_count_changes.csv`.
+
+## 3. 시세·거래일·상장폐지 후보 조사 (2026-10-04)
 
 | 출처 | 일봉 | 상장폐지 종목 | 거래일/휴장 | 기업행동 | 사용 조건 위험 | 접근 |
 |---|---|---|---|---|---|---|
@@ -98,7 +125,7 @@
 2. 상장폐지 종목 처리: KRX 수동 다운로드로 일부 복원 vs 생존 편향을 한계로 명시하고 기간을 좁힘.
 3. 검증 기간 시작점: 거래일 캘린더가 공식적으로 있는 2016년 이후를 기본으로 제안합니다.
 
-## 3. 저장소 반영 상태
+## 4. 저장소 반영 상태
 
 - 구현: `trading_helper/opendart.py`(수집), `trading_helper/opendart_normalize.py`(정규화).
 - 원본: `data/raw/opendart/{list,document}/` + `manifest.jsonl`(sha256, fetched_at, 마스킹된 요청).

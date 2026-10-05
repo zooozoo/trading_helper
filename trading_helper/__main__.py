@@ -8,9 +8,11 @@ import sys
 from .rules import Bar, Costs, Event, Policy, plan_entry, signal_at_close
 from .validate import format_text, validate_all
 from . import opendart as od
+from . import datagokr as dg
 from .opendart_normalize import normalize
 
 DEFAULT_RAW = "data/raw/opendart"
+DEFAULT_PRICE_RAW = "data/raw/datagokr"
 DEFAULT_NORMALIZED = "data/normalized"
 
 
@@ -107,6 +109,27 @@ def run_dart_normalize(args):
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
+def run_prices_collect(args):
+    try:
+        key = dg.get_api_key()
+    except dg.DataGoKrError as exc:
+        sys.exit(f"prices-collect: {exc}")
+    store = od.RawStore(Path(args.raw))
+    client = dg.Client(key, store, min_interval_s=args.interval)
+    try:
+        summary = dg.collect(client, date.fromisoformat(args.start), date.fromisoformat(args.end),
+                             max_requests=args.max_requests)
+    except dg.DataGoKrError as exc:
+        summary = {"stopped": dg.mask(str(exc), key)}
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    sys.exit(1 if "stopped" in summary else 0)
+
+
+def run_prices_normalize(args):
+    summary = dg.normalize(od.RawStore(Path(args.raw)), Path(args.out))
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser(prog="trading_helper", description="Unvalidated research starter")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -135,6 +158,17 @@ def main():
     nrm.add_argument("--raw", default=DEFAULT_RAW)
     nrm.add_argument("--out", default=DEFAULT_NORMALIZED)
     nrm.set_defaults(func=run_dart_normalize)
+    pc = sub.add_parser("prices-collect", help="fetch daily whole-market prices from data.go.kr (key from env)")
+    pc.add_argument("--start", required=True, help="YYYY-MM-DD (coverage starts 2020-01-02)")
+    pc.add_argument("--end", required=True, help="YYYY-MM-DD")
+    pc.add_argument("--max-requests", type=int, default=2000, help="daily quota is 10,000 for a dev key")
+    pc.add_argument("--interval", type=float, default=0.2)
+    pc.add_argument("--raw", default=DEFAULT_PRICE_RAW)
+    pc.set_defaults(func=run_prices_collect)
+    pn = sub.add_parser("prices-normalize", help="build prices/securities/calendar/halts CSVs from raw daily files")
+    pn.add_argument("--raw", default=DEFAULT_PRICE_RAW)
+    pn.add_argument("--out", default=DEFAULT_NORMALIZED)
+    pn.set_defaults(func=run_prices_normalize)
     args = parser.parse_args()
     args.func(args)
 
