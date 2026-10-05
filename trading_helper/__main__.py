@@ -12,6 +12,7 @@ from . import datagokr as dg
 from . import weekly_v1 as wv
 from . import diagnostics as dx
 from . import screen as sc
+from . import fundamentals as fd
 from .market import load_market
 from .opendart_normalize import normalize
 
@@ -259,6 +260,33 @@ def run_screen_events(args):
     print(f"outputs: {out_dir}", file=sys.stderr)
 
 
+def run_fundamentals_collect(args):
+    import csv as _csv
+    try:
+        key = od.get_api_key()
+    except od.OpenDartError as exc:
+        sys.exit(f"fundamentals-collect: {exc}")
+    store = od.RawStore(Path(args.raw))
+    client = od.Client(key, store, min_interval_s=args.interval)
+    with open(Path(args.normalized) / "securities.csv", encoding="utf-8", newline="") as fh:
+        symbols = {r["symbol"] for r in _csv.DictReader(fh) if r["is_common_stock"] == "true"}
+    mapping = fd.corp_map(client, store, symbols)
+    years = list(range(args.start_year, args.end_year + 1))
+    try:
+        summary = fd.collect(client, store, sorted(mapping.values()), years, max_requests=args.max_requests)
+    except od.OpenDartError as exc:
+        summary = {"stopped": od.mask(str(exc), key)}
+    summary.update(symbols_common=len(symbols), symbols_mapped=len(mapping))
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    sys.exit(1 if "stopped" in summary else 0)
+
+
+def run_fundamentals_normalize(args):
+    store = od.RawStore(Path(args.raw))
+    counts = fd.normalize(store, Path(args.out))
+    print(json.dumps(counts, ensure_ascii=False, indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser(prog="trading_helper", description="Unvalidated research starter")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -338,6 +366,18 @@ def main():
     scn.add_argument("--normalized", default=DEFAULT_NORMALIZED)
     scn.add_argument("--out", default="outputs/experiments")
     scn.set_defaults(func=run_screen_events)
+    fc = sub.add_parser("fundamentals-collect", help="OpenDART key accounts (fnlttMultiAcnt) for all common stocks")
+    fc.add_argument("--start-year", type=int, default=2019)
+    fc.add_argument("--end-year", type=int, default=2026)
+    fc.add_argument("--max-requests", type=int, default=3000)
+    fc.add_argument("--interval", type=float, default=0.3)
+    fc.add_argument("--raw", default=DEFAULT_RAW)
+    fc.add_argument("--normalized", default=DEFAULT_NORMALIZED)
+    fc.set_defaults(func=run_fundamentals_collect)
+    fn = sub.add_parser("fundamentals-normalize", help="build fundamentals.csv from raw key-account files")
+    fn.add_argument("--raw", default=DEFAULT_RAW)
+    fn.add_argument("--out", default=str(Path(DEFAULT_NORMALIZED) / "fundamentals.csv"))
+    fn.set_defaults(func=run_fundamentals_normalize)
     args = parser.parse_args()
     args.func(args)
 
