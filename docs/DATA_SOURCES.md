@@ -83,6 +83,24 @@ API 페이지: https://www.data.go.kr/data/15094808/openapi.do
 정규화: `python -m trading_helper prices-normalize` → `data/normalized/prices.csv`, `securities.csv`,
 `calendar.csv`, `halts.csv`, `share_count_changes.csv`.
 
+## 2b. 지수: 공공데이터포털 금융위원회_지수시세정보 (채택, 2026-10-06 실측)
+
+엔드포인트: `https://apis.data.go.kr/1160100/GetMarketIndexInfoService_V2/getStockMarketIndex_V2`. 별도 활용신청 필요.
+- `idxNm` 정확 일치 + `beginBasDt/endBasDt`로 지수 하나의 전체 기간을 한 번에 받음(2020~2026 1,656행). 2019 이전 없음.
+- 수집 지수: 코스피, 코스닥, 코스피 200, 코스닥 150, 코스피 소형주, 코스닥 소형주. 필드: 시가·고가·저가·종가·거래대금·시가총액.
+- **가격 지수만 제공(배당 제외).** 코스피·코스닥 총수익 지수는 없음. 전략은 가격 지수 + 시장 배당수익률(연 1.5~2%p)을
+  넘어야 지수 ETF 보유를 이긴 것으로 본다. 명령: `python -m trading_helper index-collect --end <date>` → `data/normalized/indexes.csv`.
+
+## 2c. 재무: OpenDART 다중회사 주요계정 `fnlttMultiAcnt` (채택, 2026-10-06 실측)
+
+- 한 번에 corp_code 100개, (사업연도, 보고서) 단위. 보통주 전체 2019~2026이 약 1,000회 요청.
+- 계정: 매출액, 영업이익, 당기순이익, 자산·부채·자본총계, 자본금, 이익잉여금, 유동자산·부채. 연결(CFS)/별도(OFS).
+- **분기 손익 금액은 누적이 아닌 해당 분기 3개월치**(삼성전자 2023: 1분기 63.7조, 반기 보고서 60.0조, 3분기 67.4조, 연간 258.9조).
+  연환산은 최근 4개 분기 합, 4분기 = 연간 − (1~3분기). 재무상태표는 시점 값.
+- 시점 규칙: `rcept_no` 앞 8자리를 공시일로 사용(`filing_date`). API는 정정 후 수치를 줄 수 있으며 원본만 받는 옵션은 없음.
+  `rcept_no`를 기록해 감사 가능하게 하되 한계로 남김.
+- 명령: `fundamentals-collect`, `fundamentals-normalize` → `data/normalized/fundamentals.csv`.
+
 ## 3. 시세·거래일·상장폐지 후보 조사 (2026-10-04)
 
 | 출처 | 일봉 | 상장폐지 종목 | 거래일/휴장 | 기업행동 | 사용 조건 위험 | 접근 |

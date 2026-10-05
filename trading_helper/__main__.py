@@ -13,6 +13,7 @@ from . import weekly_v1 as wv
 from . import diagnostics as dx
 from . import screen as sc
 from . import fundamentals as fd
+from . import indexes as ix
 from .market import load_market
 from .opendart_normalize import normalize
 
@@ -287,6 +288,21 @@ def run_fundamentals_normalize(args):
     print(json.dumps(counts, ensure_ascii=False, indent=2))
 
 
+def run_index_collect(args):
+    try:
+        key = dg.get_api_key()
+    except dg.DataGoKrError as exc:
+        sys.exit(f"index-collect: {exc}")
+    store = od.RawStore(Path(args.raw))
+    names = tuple(n.strip() for n in args.names.split(",")) if args.names else ix.DEFAULT_INDEXES
+    try:
+        summary = ix.collect(key, store, names, date.fromisoformat(args.start), date.fromisoformat(args.end))
+    except dg.DataGoKrError as exc:
+        sys.exit(f"index-collect: {dg.mask(str(exc), key)}")
+    summary["normalize"] = ix.normalize(store, Path(args.out))
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser(prog="trading_helper", description="Unvalidated research starter")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -378,6 +394,13 @@ def main():
     fn.add_argument("--raw", default=DEFAULT_RAW)
     fn.add_argument("--out", default=str(Path(DEFAULT_NORMALIZED) / "fundamentals.csv"))
     fn.set_defaults(func=run_fundamentals_normalize)
+    ic = sub.add_parser("index-collect", help="KOSPI/KOSDAQ price indices from data.go.kr (one request per index)")
+    ic.add_argument("--start", default="2020-01-02")
+    ic.add_argument("--end", required=True)
+    ic.add_argument("--names", default=None, help="comma-separated idxNm values; default KOSPI/KOSDAQ set")
+    ic.add_argument("--raw", default=DEFAULT_PRICE_RAW)
+    ic.add_argument("--out", default=str(Path(DEFAULT_NORMALIZED) / "indexes.csv"))
+    ic.set_defaults(func=run_index_collect)
     args = parser.parse_args()
     args.func(args)
 
