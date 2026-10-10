@@ -1,5 +1,7 @@
 # trading_helper
 
+**이어받는 작업자는 `docs/HANDOFF.md`부터 읽으세요.** 첫 메시지는 `prompts/03_handoff_start.md`.
+
 국내 주식 이벤트 전략의 검증용 초기 설정. Claude Code가 메인, Codex가 검토를 담당합니다.
 실제 종목 추천·자동 주문·실데이터 성과 검증은 아직 구현하거나 수행하지 않았습니다.
 
